@@ -1,0 +1,471 @@
+---
+title: "Predicting Credit Default on German Loan Data"
+author: "Irene Le & Ran Liu"
+date: "June 3, 2025"
+format:
+  pdf:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    number-depth: 2  
+    documentclass: article
+    tables: page
+    header-includes: |
+      \usepackage{fancyhdr}
+      \usepackage{titling}
+      \usepackage{etoolbox}
+      \pretocmd{\tableofcontents}{\clearpage}{}{}
+      \apptocmd{\tableofcontents}{\clearpage}{}{}
+
+editor: visual
+---
+
+# Executive Summary
+
+This project aims to predict credit default based on German loan data from the UCI Machine Learning Repository. The response variable was a binary value (Default = 0, Default = 1). The goal was to identify the most effective classification model for predicting credit default using 20 different credit applicant details as predictors. 9 Models were trained and evaluated (Linear Discriminant Analysis (LDA), Quadratic Discriminant Analysis (QDA), Logisitic Regression, K-Nearest-Neighbors (KNN), Naive Bayes, Support Vector Machines (Linear, Polynomial, and Radial Basis Function (RBF)). Based on a comparative analysis of the models, the Naive Bayes classification model yielded the best overall performance in separating non-default and default credit applicants. It achieved the highest accuracy and lowest error rate, while maintaining strong sensitivity, specificity, and AUC. Given its balance of accuracy and simplicity, Naive Bayes is recommended as the most optimal model for credit risk assessment in this analysis.
+
+# Introduction and Background
+
+Credit risk assessment is critical for financial institutions to evaluate an applicant's creditworthiness. The process of assessing an applicant's credit risk involves analyzing a series of factors including credit history, age, employment, and other demographic and financial data.
+
+Credit default occurs when a borrower fails to repay a loan, and signals that a borrower is unable to meet financial obligations.
+
+One of the challenges in this analysis was addressing the class imbalance in the Default variable, which presented significantly more non-default cases than default cases. This imbalance introduce a bias in the models, where classifiers can favor the majority class. To address this, we undersampled the majority (non-default) class. After doing so, our models yielded much better performance.
+
+# Data
+
+### Data Description
+
+The data used for this project comes from the German Credit dataset obtained from the UCI Machine Learning Repository. It contains information on 1,000 credit applicants. The dataset includes 20 predictor variables, consisting of categorical (e.g. credit history, personal status, employment status) and numerical (e.g loan duration, credit amount, age) variables. The response variable, Default, is binary:
+
+-   0 = Good credit risk
+
+-   1 = Bad credit risk
+
+The dataset exhibited a class imbalance, with a higher number of good credit cases than bad. An undersampling method was performed to address the imbalance and improve the performance of the models.
+
+### Data Overview
+
++-----------------+-------------------------------------------+---------------+
+| Variable Name   | Description                               | Type          |
++=================+===========================================+===============+
+| Default         | Credit default (0 = No, 1 = Yes)          | Binary        |
++-----------------+-------------------------------------------+---------------+
+| checkingstatus1 | Status of existing checking account       | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| duration        | Duration in months                        | Numerical     |
++-----------------+-------------------------------------------+---------------+
+| history         | Credit history                            | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| purpose         | Purpose of the loan                       | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| amount          | Credit amount                             | Numerical     |
++-----------------+-------------------------------------------+---------------+
+| savings         | Savings account/bonds                     | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| employ          | Years at current employment               | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| installment     | Installment rate (% of disposable income) | Numerical     |
++-----------------+-------------------------------------------+---------------+
+| status          | Personal status and sex                   | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| others          | Other debtors / guarantors                | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| residence       | Years at present residence                | Numerical     |
++-----------------+-------------------------------------------+---------------+
+| property        | Type of property                          | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| age             | Age in years                              | Numerical     |
++-----------------+-------------------------------------------+---------------+
+| otherplans      | Other installment plans                   | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| housing         | Housing situation                         | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| cards           | Number of existing credits at this bank   | Numerical     |
++-----------------+-------------------------------------------+---------------+
+| job             | Job type                                  | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| liable          | Number of people liable for maintenance   | Numerical     |
++-----------------+-------------------------------------------+---------------+
+| tele            | Telephone availability                    | Categorical   |
++-----------------+-------------------------------------------+---------------+
+| foreign         | Foreign worker status                     | Categorical   |
++-----------------+-------------------------------------------+---------------+
+
+### Exploratory Data Analysis
+
+##### 1.1 Relationships of Age, Duration, and Amount by Default
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 6
+library(MASS)
+library(ROCR)
+library(e1071)
+library(class)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+
+ 
+
+credit_df<- read.csv("C:/Users/ple52/Downloads/germancredit.csv")
+
+
+# data cleaning and preprocessing
+# Convert all character columns to factors
+credit_df[] <- lapply(credit_df, function(x) {
+  if (is.character(x)) as.factor(x) else x
+})
+
+attach(credit_df)
+num_df <- credit_df %>%
+  select(Default, amount, duration, age) %>%
+  pivot_longer(cols = -Default, names_to = "Variable", values_to = "Value")
+
+# Plot boxplots
+ggplot(num_df, aes(x = factor(Default), y = Value, fill = factor(Default))) +
+  geom_boxplot() +
+  facet_wrap(~ Variable, scales = "free", ncol = 2) +
+  labs(title = "Boxplots of Numeric Variables by Default", x = "Default", y = "Value", fill = "Default") +
+  theme_minimal()
+
+
+```
+
+Figure 1: Boxplots of Numeric Variables by Default
+
+Key numerical predictors were examined to identify trends related to default. Several trends were found:
+
+-   Credit Amount: Defaulters generally had higher credit amounts.
+
+-   Loan Duration: Higher default rates were observed among applicants with longer loan duration.
+
+-   Age: Defaulters tended to be slightly younger on average.
+
+##### 1.2 Correlation of All Numerical Variables
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 6
+
+library(corrplot)
+
+# Compute correlation matrix of numeric variables
+numeric_df <- credit_df[sapply(credit_df, is.numeric)]
+cor_matrix <- cor(numeric_df, use = "complete.obs")
+
+# Plot with correlation values shown
+corrplot(cor_matrix,
+         method = "color",         # colored squares
+         type = "upper",           # show upper triangle
+         addCoef.col = "black",    # add correlation coefficients
+         tl.col = "black",         # text label color
+         tl.cex = 0.8,             # text label size
+         number.cex = 0.7,         # number size
+         diag = FALSE)             # hide diagonal
+
+
+```
+
+Figure 4: Correlation Matrix of Numerical Variables and Default
+
+The above correlation matrix displays the relationships between numeric variables in our dataset.
+
+-   Duration and Amount show a moderate positive correlation (r = 0.62), indicating that longer loan durations may be associated with higher loan amounts.
+
+-   Default shows a weak but positive correlation with duration (r = 0.21) and amount (r = 0.15), suggesting that longer loans and higher loan amounts are slightly associated with a higher risk of default.
+
+-   Most other variables show weak correlations with Default, such as installment, residence, age, and cards.
+
+##### 1.3 Relationships of Numerical Variables
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 6
+library(GGally)
+GGally::ggpairs(
+  credit_df[, c("duration", "amount", "installment", "age", "Default")],
+  aes(color = factor(Default), alpha = 0.5)
+)
+
+```
+
+Figure 5: Pairplots, Density Plots, and Correlations of Numerical Variables
+
+The figure above shows a pairwise correlation matrix and density plots for key numeric variables, including duration, amount, installment, age, and Default.
+
+From the density plots, we observe that:
+
+-   Defaulters tend to have shorter loan durations, while non-defaulters show a more right-skewed distribution with longer durations.
+
+-   Loan amount distributions overlap, but defaulters show a higher concentration of lower loan amounts.
+
+-   The distribution of installment rates is uniform across default status.
+
+-   Colored by default status, the scatterplots do not reveal strong visual separability. None of the numerical variables individually offer clear linear separation between defaulters and non-defaulters.
+
+##### 1.4 Relationships of Categorical Variables
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 6
+cat_df <- credit_df %>%
+  select(Default, property, employ, savings, purpose, history, checkingstatus1) %>%
+  pivot_longer(cols = -Default, names_to = "Variable", values_to = "Category")
+
+#  bar plots
+ggplot(cat_df, aes(x = Category, fill = factor(Default))) +
+  geom_bar(position = "fill") +
+  facet_wrap(~ Variable, scales = "free", ncol = 2) +
+  labs(title = "Proportional Bar Plots of Categorical Variables by Default", 
+       x = "Category", y = "Proportion", fill = "Default") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Figure 2: Proportion Bar Plots of Categorical Variables by Default
+
+Proportional barplots were used to visualize the how different factor levels correspond to default outcomes. Several trends were found:
+
+-   Checking Account Status: Applicants with negative balances (A11) had the highest default rate.
+
+-   Employment Status: The unemployed group (A71) showed a higher proportion of defaults.
+
+-   Credit History: Applicants who had no credits taken / all credits paid back (A71) had the highest proportion of defaults.
+
+-   Property Ownership: Applicants with no property (A124) were more likely to default.
+
+-   Purpose of Loan: Used car purchases (A41) was associated with increased defaults.
+
+-   Savings: Applicants with low or no savings (A61) were more likely to default.
+
+##### 1.5 Class Imbalance
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig-height: 6
+#| fig-width: 10
+library(tidyverse)
+library(corrplot)
+ggplot(credit_df, aes(x = as.factor(Default))) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribution of Credit Default",
+       x = "Default (0 = Good Credit, 1 = Bad Credit)",
+       y = "Count") +
+  theme_minimal()
+
+```
+
+Figure 3: Distribution of Credit Default
+
+A significant class imbalance was present in the data, with the number of non-default cases exceeding that of default cases. This imbalance can bias classification models in predicting the majority class (non-default) if not addressed properly. We applied undersampling to the non-default group, which improved model sensitivity and specificity.
+
+# Methodology
+
+#### Data Preprocessing
+
+The dataset was examined for data quality and consistency. The preprocessing steps included:
+
+-   **Data Type Conversion**: All character variables were converted into factor variables to ensure proper handling.
+
+-   **Missing Value Check**:\
+    A check for missing values confirmed that the dataset contained no missing entries.
+
+-   **Class Imbalance Handling**:\
+    The dataset originally exhibited class imbalance, with significantly more non-default (class 0) cases than default (class 1). To address this, we applied random undersampling to the majority class (non-default) to match the number of observations in the minority class. This resulted in a balanced dataset, helping prevent bias in model training.
+
+-   **Train-Test Split**:\
+    The balanced dataset was randomly split into 80% training and 20% testing data. All models were trained on the training set and evaluated on the testing set.
+
+-   **Categorical Encoding for KNN**:\
+    Since K-Nearest Neighbors (KNN) requires numeric inputs, we applied **one-hot encoding** to convert categorical variables into dummy variables for KNN modeling.
+
+-   **Feature Scaling**:\
+    SVMs and KNN relied on normalized input due to the structure of the model matrix generated from `model.matrix()` during encoding.
+
+#### Methods
+
+A variety of statistical classification models were explored to determine the most effective model for predicting credit default. The following models were implemented:
+
+-   **Logistic Regression:** A linear classification model that estimates the probability of default using a logistic function.
+
+-   **Linear Discriminant Analysis (LDA):** A probabilistic classifier that finds a linear combination of features that best separates default vs. non-default cases.
+
+-   **Quadratic Discriminant Analysis (QDA):** Similar to LDA but allows each class to have its own covariance matrix, making it more flexible in capturing non-linear boundaries.
+
+-   **Naive Bayes:** A model based on Bayes’ Theorem, assuming conditional independence between features.
+
+-   **K-Nearest Neighbors (KNN):** A model that classifies datapoints based on the majority class among the *k* closest observations in the training data.
+
+-   **Support Vector Machines (SVM):** A model that utilizes the optimal hyperplane separating the classes. We tested SVMs with:
+
+    -   **Linear kernel:** Assumes the classes are linearly separable.
+
+    -   **Polynomial kernel (degrees 2 and 3):** Captures non-linear relationships using polynomial transformations.
+
+    -   **Radial Basis Function (RBF) kernel:** Enables the SVM to separate data with curved or complex boundaries.
+
+All models were based on an 80/20 train-test split.
+
+#### Model Evaluation
+
+Each model was evaluated on the 20% test set using the following five performance metrics:
+
+-   **Accuracy**: The overall proportion of correct predictions.
+
+    $$
+    \text{Accuracy} = \frac{TP + TN}{TP + TN + FP + FN} 
+    $$
+
+-   **Sensitivity (Recall or True Positive Rate)**: The ability of the model to correctly identify actual defaulters.
+
+    $$
+    \text{Sensitivity} = \frac{TP}{TP + FN} 
+    $$
+
+-   **Specificity (True Negative Rate)**: The ability to correctly identify non-defaulters.
+
+    $$
+    \text{Specificity} = \frac{TN}{TN + FP} 
+    $$
+
+-   **Error Rate**: The overall proportion of incorrect predictions.
+
+    $$
+    \text{Error Rate} = \frac{FP + FN}{TP + TN + FP + FN}
+    $$
+
+-   **AUC (Area Under the ROC Curve)**: A measure of the model’s ability to distinguish between default and non-default classes across all thresholds.
+
++-------------------------+------------------------------------------------------------+
+| Term                    | Description                                                |
++=========================+============================================================+
+| **TP** (True Positive)  | Model predicted “Default” and they actually did default    |
++-------------------------+------------------------------------------------------------+
+| **TN** (True Negative)  | Model predicted “No Default” and they did not default      |
++-------------------------+------------------------------------------------------------+
+| **FP** (False Positive) | Model predicted “Default” but they did not default         |
++-------------------------+------------------------------------------------------------+
+| **FN** (False Negative) | Model predicted “No Default” but they actually did default |
++-------------------------+------------------------------------------------------------+
+
+: Confusion Matrix Terminology
+
+#### Hyper-parameter Tuning
+
+For models requiring tuning, we used 10-fold cross-validation on the training set to select optimal hyperparameters:
+
+-   **K-Nearest Neighbors (KNN):** The number of neighbors *k* was selected by minimizing classification error on the validation folds.
+
+-   **Support Vector Machines (SVM):** We tuned the cost parameter, which controls the trade-off between margin width and classification error, and the kernel parameter for the RBF kernel, which determines the influence of individual support vectors.
+
+Grid search was performed over a range of values, and the parameter that achieved the highest average cross-validation accuracy was selected for final evaluation on the test set.
+
+The table below summarizes the optimal hyperparameter values selected for each model.
+
++---------------------------+-------------------------+-------------------+
+| **Model**                 | **Hyperparameter**      | **Optimal Value** |
++===========================+=========================+===================+
+| KNN                       | K (number of neighbors) | K = 6             |
++---------------------------+-------------------------+-------------------+
+| SVM (Linear)              | Cost                    | Best cost = 0.01  |
++---------------------------+-------------------------+-------------------+
+| SVM (Polynomial Degree 2) | Cost                    | Best cost = 10    |
++---------------------------+-------------------------+-------------------+
+| SVM (Polynomial Degree 3) | Cost                    | Best cost = 100   |
++---------------------------+-------------------------+-------------------+
+| SVM (RBF)                 | Cost, Gamma             | Best cost = 10    |
+|                           |                         |                   |
+|                           |                         | Best gamma = 0.01 |
++---------------------------+-------------------------+-------------------+
+
+: Hyperparameter Tuning Summary
+
+# Results
+
+This study aimed to classify defaulters and non-defaulters based on an applicants' financial and personal attributes. The results below summarize the predictive performance of each model, highlighting trade-offs between correctly identifying defaulters and minimizing misclassifications.
+
+#### Model Performance Summary
+
+```{r}
+#| echo: false
+#| warning: false
+library(knitr)
+
+performance <- data.frame(
+  Model = c("LDA", "QDA", "Naive Bayes", "Logistic", "KNN", 
+            "SVM Linear", "SVM Poly 2", "SVM Poly 3", "SVM Radial"),
+  Accuracy = c(0.8083, 0.7667, 0.8250, 0.8083, 0.5417, 
+               0.7917, 0.7583, 0.7000, 0.7667),
+  `Error Rate` = c(0.1917, 0.2333, 0.1750, 0.1917, 0.4583, 
+                   0.2083, 0.2417, 0.3000, 0.2333),
+  Specificity = c(0.7778, 0.7460, 0.8571, 0.7778, 0.5397, 
+                  0.7937, 0.6508, 0.6032, 0.7302),
+  Sensitivity = c(0.8421, 0.7895, 0.7895, 0.8421, 0.5439, 
+                  0.7895, 0.8772, 0.8070, 0.8070),
+  AUC = c(0.8630, 0.8131, 0.8622, 0.8599, 0.5831, 
+          0.8599, 0.8488, 0.7934, 0.8655)
+)
+
+kable(performance, caption = "Model Performance Summary", digits = 4)
+
+```
+
+![ROC Curves for All Models](images/roc%20curves%20for%20all%20models.png)
+
+**ROC Curve and AUC Scores**\
+To evaluate the discriminatory power of each model, we plotted Receiver Operating Characteristic (ROC) curves and computed the Area Under the Curve (AUC) for each. The ROC curves show that Naive Bayes, LDA, and Logistic Regression performed the best overall, each achieving AUC scores above 0.86. SVM with a radial kernel had the highest AUC (0.8655), indicating strong class separation ability. KNN had the lowest AUC, suggesting poor classification performance.
+
+![Accuracy for All Models](images/model%20accuracy.png)
+
+**Model Accuracy Comparison**\
+To compare overall predictive performance, we visualized the classification accuracy of each model. Naive Bayes achieved the highest accuracy at **82.5%**, followed closely by LDA and Logistic Regression, both at **80.8%**. SVM with polynomial and radial kernels showed moderate performance, while KNN had the lowest accuracy.
+
+# **Discussion**
+
+Naive Bayes was the best overall performer, achieving the highest specificity (85.7%) and lowest error rate (17.5%), while maintaining strong sensitivity. It also had one of the highest AUC scores (0.8622), making it our final recommendation.
+
+LDA and Logistic Regression were tied in performance, both yielding strong sensitivity (84.2%) and strong AUCs above 0.86.
+
+SVM with a radial kernel had a high AUC (0.8655), but a slightly higher error rate compared to Naive Bayes.
+
+SVM with polynomial kernels (degree 2 and 3) showed high sensitivity, especially degree 2 (87.7%), but at the cost of lower specificity.
+
+KNN performed the worst across all metrics, making it unsuitable for this task.
+
+Models like Naive Bayes, Logistic Regression, and LDA performed best, likely because the data’s structure supported simple, linear decision boundaries. Non-linear models like QDA and SVMs with polynomial or radial kernels did not perform as well. These complex models may have overfit, as their complexity was not necessary for simple linear separation of the data. KNN struggled, most likely due to its distance calculations, which are less effective with categorical variables. 
+
+# Conclusion and Recommendation
+
+Based on our results, we recommend using the Naive Bayes classifier for predicting credit default. It achieved the highest accuracy (82.5%) and the lowest error rate (17.5%), while maintaining strong specificity (85.7%) and AUC (0.86), indicating a well balanced performance in identifying both defaulters and non-defaulters. This balanced and consistent performance across sensitivity, specificity, and model confidence makes Naive Bayes a reliable and practical choice for credit risk prediction.
+
+# Limitations
+
+While our analysis yielded valuable insights, there are several limitations to consider:
+
+-   **Class Imbalance**: The original dataset had an imbalanced distribution of default and non-default cases. Although we applied undersampling to balance the classes, this may have led to a loss of information and reduced generalizability to real-world distributions.
+
+-   **Modeling Assumptions**: Some models, such as LDA and QDA, assume normality and equal variance, which may not fully hold in the data. Violating these assumptions could affect the model's performance and reliability.
+
+-   **Single Test Split**: We used a single random train-test split. Cross-validation might provide more robust performance estimates across different subsets of the data.
+
+Despite these limitations, our findings provide meaningful insights into the performance of various classification models for credit default prediction. Addressing these limitations in future work may further improve model performance and applicability.
+
+# References
+
+**UCI Machine Learning Repository.** (n.d.). *Statlog (German Credit Data) Data Set*. <https://archive.ics.uci.edu/ml/datasets/statlog+(german+credit+data)>
+
+**Ledolter, Johannes**. *Data Mining and Business Analytics with R*. Wiley, 2013.\
+Data retrieved from: <https://www.biz.uiowa.edu/faculty/jledolter/DataMining/datatext.html>
